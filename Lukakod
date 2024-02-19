@@ -1,0 +1,104 @@
+install.packages("shiny")
+install.packages("openxlsx")
+install.packages("Hmisc")
+
+# Ładowanie bibliotek
+library(shiny)
+library(openxlsx)
+library(Hmisc)
+
+# Funkcja do wykrywania luk w danych
+wykryjLuki <- function(dane) {
+  luki_w_kolumnach <- sapply(dane, function(kolumna) sum(is.na(kolumna)))
+  return(luki_w_kolumnach)
+}
+
+# Funkcja do imputacji danych
+imputujLuki <- function(dane) {
+  dane[is.na(dane)] <- 0  # Replace NA values with a default value (0)
+  dane_imputowane <- Hmisc::impute(dane, fun = function(x) median(x, na.rm = TRUE))
+  return(dane_imputowane)
+}
+
+# Funkcja do filtrowania danych zawierających luki
+filtrujDaneZLukami <- function(dane) {
+  dane_z_lukami <- dane[rowSums(is.na(dane)) > 0, ]
+  return(dane_z_lukami)
+}
+
+# Definiowanie interfejsu użytkownika
+ui <- fluidPage(
+  titlePanel("Wykrywanie i Imputacja luk w danych"),
+  
+  sidebarLayout(
+    sidebarPanel(
+      fileInput("file", "Wybierz plik Excel (.xlsx)", accept = c(".xlsx")),
+      br(),
+      actionButton("detectGaps", "Wykryj luki"),
+      actionButton("imputeGaps", "Imputuj luki")
+    ),
+    
+    mainPanel(
+      tabsetPanel(
+        tabPanel("Oryginalne dane", tableOutput("originalDataTable")),
+        tabPanel("Wiersze z lukami", tableOutput("rowsWithGapsTable"))
+      ),
+      textOutput("gapOutput")
+    )
+  )
+)
+
+# Definiowanie serwera
+server <- function(input, output, session) {
+  
+  loaded_data <- reactive({
+    req(input$file)
+    read.xlsx(input$file$datapath, detectDates = TRUE)
+  })
+  
+  # Wyświetlanie oryginalnych danych w tabeli
+  output$originalDataTable <- renderTable({
+    if (!is.null(loaded_data())) {
+      loaded_data()
+    }
+  })
+  
+  # Wykrywanie luk w danych
+  observeEvent(input$detectGaps, {
+    dane_z_lukami <- filtrujDaneZLukami(loaded_data())
+    
+    output$gapOutput <- renderText({
+      paste("Liczba luk w danych przed imputacją w poszczególnych kolumnach:")
+      for (i in seq_along(wykryjLuki(loaded_data()))) {
+        cat("\nKolumna ", names(wykryjLuki(loaded_data()))[i], ": ", wykryjLuki(loaded_data())[i])
+      }
+    })
+    
+    output$rowsWithGapsTable <- renderTable({
+      dane_z_lukami
+    })
+  })
+  
+  # Imputacja luk w danych
+  observeEvent(input$imputeGaps, {
+    dane_imputowane <- imputujLuki(loaded_data())
+    
+    luki_po_imputacji <- wykryjLuki(dane_imputowane)
+    
+    output$gapOutput <- renderText({
+      paste("Liczba luk w danych po imputacji w poszczególnych kolumnach:")
+      for (i in seq_along(luki_po_imputacji)) {
+        cat("\nKolumna ", names(luki_po_imputacji)[i], ": ", luki_po_imputacji[i])
+      }
+    })
+    
+    output$rowsWithGapsTable <- renderTable({
+      if (!is.null(dane_imputowane)) {
+        filtrujDaneZLukami(dane_imputowane)
+      }
+    })
+  })
+}
+
+# Uruchamianie aplikacji Shiny
+shinyApp(ui, server)
